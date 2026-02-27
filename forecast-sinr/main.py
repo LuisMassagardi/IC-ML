@@ -84,4 +84,4 @@ multi_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.test, verbose
 
 WindowGenerator.plot = Plotter.plot_window_performance
 multi_window.plot(multi_lstm_model)
-plt.savefig('Window_Performance_1min-2.png')
+plt.savefig('tst.png')

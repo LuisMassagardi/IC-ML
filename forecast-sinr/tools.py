@@ -14,7 +14,7 @@ class Plotter():
         plt.xlabel('time (s)')
         plt.ylabel('sinr (dB)')
         plt.grid(True, which='both', linestyle='--', alpha=0.5)
-        plt.savefig('sinr_1min-2.png')
+        plt.savefig('tst.png')
     
     @staticmethod
     def plot_violin(scaled_df):
