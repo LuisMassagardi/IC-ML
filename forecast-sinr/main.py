@@ -1,6 +1,7 @@
 import tensorflow as tf
 import pandas as pd
 import matplotlib.pyplot as plt
+import keras_tuner as kt
 
 from window_generator import WindowGenerator
 from tools import Plotter
@@ -15,7 +16,7 @@ if gpus:
     except RuntimeError as e:
         print(e)
 
-total_df = pd.read_csv("/home/luis_massagardi/5G-air-simulator/TOOLS/SINR_OneUe_1.4Mhz_1min_2.txt", names=['sinr', 'time'])
+total_df = pd.read_csv("/home/luis_massagardi/5G-air-simulator/TOOLS/SINR_OneUe_1.4Mhz_15min_1.txt", names=['sinr', 'time'])
 
 df = total_df[['sinr']]
 
@@ -40,48 +41,88 @@ train_df = train_df.dropna()
 
 Plotter.plot_violin(train_df)
 
-multi_val_performance = {}
-multi_performance = {}
+OUT_STEPS = 10
 
-OUT_STEPS = 5
+IN_STEPS = 20
 
-multi_lstm_model = tf.keras.Sequential([
-    # Shape [batch, time, features] => [batch, lstm_units].
-    # Adding more `lstm_units` just overfits more quickly.
-    tf.keras.layers.LSTM(32, return_sequences=False),
-    # Shape => [batch, out_steps*features].
-    tf.keras.layers.Dense(OUT_STEPS*num_features,
-                          kernel_initializer=tf.initializers.zeros()),
-    # Shape => [batch, out_steps, features].
-    tf.keras.layers.Reshape([OUT_STEPS, num_features])
-])
+def model_builder(hp):
+    model = tf.keras.Sequential()
+    
+    hp_units = hp.Int('units', min_value=16, max_value=256, step=16) # Tune the number of LSTM units
+    
+    hp_activation = hp.Choice('activation', values=['tanh', 'relu', 'selu']) # Tune the activation function
+    
+    model.add(tf.keras.layers.LSTM(units=hp_units, 
+                                   activation=hp_activation,
+                                   return_sequences=False))
+    
+    hp_dropout = hp.Float('dropout', min_value=0.0, max_value=0.5, step=0.1) # Tune Dropout rate
+    model.add(tf.keras.layers.Dropout(hp_dropout))
+    
+    model.add(tf.keras.layers.Dense(OUT_STEPS * num_features,
+                                    kernel_initializer=tf.initializers.zeros()))
+    model.add(tf.keras.layers.Reshape([OUT_STEPS, num_features]))
 
-MAX_EPOCHS = 20
+    hp_lr = hp.Choice('learning_rate', values=[1e-2, 1e-3, 1e-4]) # Tune the Learning Rate
 
-def compile_and_fit(model, window, patience=2):
-  early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
-                                                    patience=patience,
-                                                    mode='min')
+    model.compile(
+        loss=tf.keras.losses.MeanSquaredError(),
+        optimizer=tf.keras.optimizers.Adam(learning_rate=hp_lr),
+        metrics=[tf.keras.metrics.MeanAbsoluteError()]
+    )
+    return model
+    
+MAX_EPOCHS = 50
 
-  model.compile(loss=tf.keras.losses.MeanSquaredError(),
-                optimizer=tf.keras.optimizers.Adam(),
-                metrics=[tf.keras.metrics.MeanAbsoluteError()])
-
-  history = model.fit(window.train, epochs=MAX_EPOCHS,
-                      validation_data=window.val,
-                      callbacks=[early_stopping])
-  return history
-
-multi_window = WindowGenerator(input_width=20, label_width=OUT_STEPS,
+multi_window = WindowGenerator(input_width=IN_STEPS, label_width=OUT_STEPS,
                                shift=OUT_STEPS, train_df=train_df, 
                                val_df=val_df, test_df=test_df,
                                label_columns=['sinr'])
 
-history = compile_and_fit(multi_lstm_model, multi_window)
+# Initialize the Tuner (Bayesian Optimization is efficient for LSTMs)
+tuner = kt.BayesianOptimization(
+    model_builder,
+    objective='val_loss',
+    max_trials=50,            # How many different models to test
+    executions_per_trial=1,    # How many times to train each model (for stability)
+    directory='keras_tuner_dir',
+    project_name='lstm_sinr_optimization',
+    overwrite = True,
+)
 
-multi_val_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.val, return_dict=True)
-multi_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.test, verbose=1, return_dict=True)
+# Early stopping to keep the search from taking forever
+callbacks = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+
+# Start the search process
+tuner.search(
+    multi_window.train,
+    epochs=MAX_EPOCHS,
+    validation_data=multi_window.val,
+    callbacks=[callbacks],
+)
+
+top_3_hps = tuner.get_best_hyperparameters(num_trials=3)
+print("\nTop 3 Models Found:")
+for i, hp in enumerate(top_3_hps):
+    print(f"Rank {i+1}: Units={hp.get('units')}, Activation={hp.get('activation')}, LR={hp.get('learning_rate')}, Dropout={hp.get('dropout')}")
+
+best_hps = top_3_hps[0]
+
+best_model = tuner.hypermodel.build(best_hps)
+
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, mode='min')
+
+history = best_model.fit(
+    multi_window.train,
+    epochs=75, # You can increase this for the final model
+    validation_data=multi_window.val,
+    callbacks=[early_stopping]
+)
+
+best_model.save('best_sinr_lstm.keras')
 
 WindowGenerator.plot = Plotter.plot_window_performance
-multi_window.plot(multi_lstm_model)
-plt.savefig('tst.png')
+
+multi_window.plot(best_model)
+
+plt.savefig('best_model_plot_performance.png')

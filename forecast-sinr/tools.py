@@ -11,10 +11,10 @@ class Plotter():
         plt.figure(figsize=(12, 6))
         plt.scatter(half_df['time'], half_df['sinr'], s=10)
         plt.title('OneUE SINR vs Time')
-        plt.xlabel('time (s)')
-        plt.ylabel('sinr (dB)')
+        plt.xlabel('Time (s)')
+        plt.ylabel('SINR (dB)')
         plt.grid(True, which='both', linestyle='--', alpha=0.5)
-        plt.savefig('tst.png')
+        plt.savefig('Final_test_dataset.png')
     
     @staticmethod
     def plot_violin(scaled_df):
@@ -27,9 +27,8 @@ class Plotter():
         plt.axhline(0, color='red', linestyle='--', alpha=0.6)
         plt.grid(True, which='both', linestyle='--', alpha=0.5)
         plt.tight_layout()
-        plt.savefig('Violin_1min-2')
+        plt.savefig('tst-2')
 
-    @staticmethod
     def plot_window_performance(self, model, plot_col='sinr'):
         inputs, labels = self.example
         plot_col_index = self.column_indices[plot_col]
@@ -75,6 +74,50 @@ class Plotter():
             if i == 0:
                 plt.legend()
             
+        plt.tight_layout()
+    
+    @staticmethod
+    def plot_actual_vs_predictions(window, model, df, title="Actual vs Predicted"):
+        all_predictions_norm = []
+        all_actuals_norm = []
+        
+        for inputs, labels in window.test:
+            predictions = model(inputs)
+            all_predictions_norm.extend(predictions[:, 0, 0].numpy())
+            all_actuals_norm.extend(labels[:, 0, 0].numpy())
+        
+
+        rolling_mean = df['sinr'].rolling(window=100).mean()
+        rolling_std = df['sinr'].rolling(window=100).std() + 1e-8
+    
+        offset = len(df) - len(all_actuals_norm)
+        stats_mean = rolling_mean.iloc[offset:].values
+        stats_std = rolling_std.iloc[offset:].values
+
+        all_actuals_db = (np.array(all_actuals_norm) * stats_std) + stats_mean
+        all_predictions_db = (np.array(all_predictions_norm) * stats_std) + stats_mean
+
+        errors = np.abs(all_actuals_db - all_predictions_db)
+        max_error_idx = np.argmax(errors)
+
+        window_size = 30
+        start_idx = max(0, max_error_idx - (window_size // 2))
+        end_idx = min(len(all_actuals_db), start_idx + window_size)
+    
+        if end_idx == len(all_actuals_db):
+            start_idx = max(0, end_idx - window_size)
+
+        plot_actuals = all_actuals_db[start_idx:end_idx]
+        plot_preds = all_predictions_db[start_idx:end_idx]
+            
+        plt.figure(figsize=(15, 6))
+        plt.plot(plot_actuals, label='Actual SINR', marker='.', color='blue', alpha=0.6, linewidth=1)
+        plt.plot(plot_preds, label='Predicted SINR', marker='.', color='orange', alpha=0.8, linestyle='--')
+        plt.title(title)
+        plt.xlabel('Timesteps (ms)')
+        plt.ylabel('SINR (dB)')
+        plt.legend()
+        plt.grid(True, alpha=0.4)
         plt.tight_layout()
             
 class Normalization:
