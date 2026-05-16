@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 class Plotter():
     @staticmethod
@@ -14,7 +15,7 @@ class Plotter():
         plt.xlabel('Time (s)')
         plt.ylabel('SINR (dB)')
         plt.grid(True, which='both', linestyle='--', alpha=0.5)
-        plt.savefig('Final_test_dataset.png')
+        plt.savefig('Val_tst_df.png')
     
     @staticmethod
     def plot_violin(scaled_df):
@@ -27,7 +28,7 @@ class Plotter():
         plt.axhline(0, color='red', linestyle='--', alpha=0.6)
         plt.grid(True, which='both', linestyle='--', alpha=0.5)
         plt.tight_layout()
-        plt.savefig('tst-2')
+        plt.savefig('Val_tst_violin.png')
 
     def plot_window_performance(self, model, plot_col='sinr'):
         inputs, labels = self.example
@@ -77,47 +78,86 @@ class Plotter():
         plt.tight_layout()
     
     @staticmethod
-    def plot_actual_vs_predictions(window, model, df, title="Actual vs Predicted"):
+    def plot_actual_vs_predictions(window, model, df, manual_start=0, window_size=100, title="Actual vs Predicted"):
         all_predictions_norm = []
         all_actuals_norm = []
-        
+
         for inputs, labels in window.test:
             predictions = model(inputs)
             all_predictions_norm.extend(predictions[:, 0, 0].numpy())
             all_actuals_norm.extend(labels[:, 0, 0].numpy())
-        
 
         rolling_mean = df['sinr'].rolling(window=100).mean()
         rolling_std = df['sinr'].rolling(window=100).std() + 1e-8
-    
         offset = len(df) - len(all_actuals_norm)
         stats_mean = rolling_mean.iloc[offset:].values
         stats_std = rolling_std.iloc[offset:].values
-
         all_actuals_db = (np.array(all_actuals_norm) * stats_std) + stats_mean
         all_predictions_db = (np.array(all_predictions_norm) * stats_std) + stats_mean
 
-        errors = np.abs(all_actuals_db - all_predictions_db)
-        max_error_idx = np.argmax(errors)
-
-        window_size = 30
-        start_idx = max(0, max_error_idx - (window_size // 2))
+        start_idx = manual_start 
         end_idx = min(len(all_actuals_db), start_idx + window_size)
-    
-        if end_idx == len(all_actuals_db):
-            start_idx = max(0, end_idx - window_size)
 
         plot_actuals = all_actuals_db[start_idx:end_idx]
         plot_preds = all_predictions_db[start_idx:end_idx]
-            
+
+        relative_indices = np.arange(0, len(plot_actuals))
+    
         plt.figure(figsize=(15, 6))
-        plt.plot(plot_actuals, label='Actual SINR', marker='.', color='blue', alpha=0.6, linewidth=1)
-        plt.plot(plot_preds, label='Predicted SINR', marker='.', color='orange', alpha=0.8, linestyle='--')
-        plt.title(title)
-        plt.xlabel('Timesteps (ms)')
+
+        plt.plot(relative_indices, plot_actuals, label='Actual SINR', marker='.', color='blue', alpha=0.6, linewidth=1)
+        plt.plot(relative_indices, plot_preds, label='Predicted SINR', marker='.', color='orange', alpha=0.8, linestyle='--')
+
+        plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
+    
+        plt.xlim(0, len(plot_actuals) - 1)
+
+        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+
+        plt.xlabel('Timestamp (ms)')
         plt.ylabel('SINR (dB)')
         plt.legend()
         plt.grid(True, alpha=0.4)
+        plt.tight_layout()
+    
+    @staticmethod
+    def plot_prediction_error_scatter(window, model, df):
+        all_predictions_norm = []
+        all_actuals_norm = []
+
+        for inputs, labels in window.test:
+            predictions = model(inputs)
+            all_predictions_norm.extend(predictions[:, 0, 0].numpy())
+            all_actuals_norm.extend(labels[:, 0, 0].numpy())
+
+        rolling_mean = df['sinr'].rolling(window=100).mean()
+        rolling_std = df['sinr'].rolling(window=100).std() + 1e-8
+        offset = len(df) - len(all_actuals_norm)
+    
+        stats_mean = rolling_mean.iloc[offset:].values
+        stats_std = rolling_std.iloc[offset:].values
+    
+        y_true = (np.array(all_actuals_norm) * stats_std) + stats_mean
+        y_pred = (np.array(all_predictions_norm) * stats_std) + stats_mean
+
+        plt.figure(figsize=(8, 8))
+    
+        plt.scatter(y_true, y_pred, alpha=0.5, color='blue', s=10)
+    
+        lims = [
+            np.min([plt.xlim(), plt.ylim()]),  
+            np.max([plt.xlim(), plt.ylim()]),  
+        ]
+        plt.plot(lims, lims, 'r--', alpha=0.75, zorder=0)
+    
+        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+        plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
+
+
+        plt.xlabel('Actual SINR (dB)')
+        plt.ylabel('Predicted SINR (dB)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
             
 class Normalization:

@@ -55,10 +55,13 @@ class WindowGenerator():
       data=data,
       targets=None,
       sequence_length=self.total_window_size,
-      sequence_stride=10,
-      shuffle=True,
-      batch_size=32,)
-    ds = ds.map(self.split_window)
+      sequence_stride=1,
+      shuffle=False,
+      batch_size=128,
+      )
+    ds = ds.map(self.split_window, num_parallel_calls=tf.data.AUTOTUNE)
+    ds = ds.cache()
+    ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
     return ds
     
   @property
